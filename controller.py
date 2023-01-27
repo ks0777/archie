@@ -21,7 +21,7 @@ except ModuleNotFoundError:
     pass
 
 from faultclass import Fault, Trigger
-from faultclass import python_worker
+from faultclass import python_worker, python_worker_unicorn
 from hdf5logger import hdf5collector
 from goldenrun import run_goldenrun
 
@@ -251,6 +251,7 @@ def controller(
     qemu_pre=None,
     qemu_post=None,
     logger_postprocess=None,
+    unicorn_emulation=False
 ):
     """
     This function builds the unrolled fault structure, performs golden run and
@@ -271,22 +272,25 @@ def controller(
 
     # Storing and restoring goldenrun_data with pickle is a temporary fix
     # A better solution is to parse the goldenrun_data from the existing hdf5 file
+    pregoldenrun_data = {}
     goldenrun_data = {}
     if goldenrun:
         [
             config_qemu["max_instruction_count"],
+            pregoldenrun_data,
             goldenrun_data,
             faultlist,
         ] = run_goldenrun(
             config_qemu, qemu_output, queue_output, faultlist, qemu_pre, qemu_post
         )
         pickle.dump(
-            (config_qemu["max_instruction_count"], goldenrun_data, faultlist),
+            (config_qemu["max_instruction_count"], pregoldenrun_data, goldenrun_data, faultlist),
             lzma.open("bkup_goldenrun_results.xz", "wb"),
         )
     else:
         (
             config_qemu["max_instruction_count"],
+            pregoldenrun_data,
             goldenrun_data,
             faultlist,
         ) = pickle.load(lzma.open("bkup_goldenrun_results.xz", "rb"))
@@ -341,22 +345,38 @@ def controller(
             faults = faultlist[itter]
             itter += 1
 
-            p = Process(
-                name=f"worker_{faults['index']}",
-                target=python_worker,
-                args=(
-                    faults["faultlist"],
-                    config_qemu,
-                    faults["index"],
-                    queue_output,
-                    qemu_output,
-                    goldenrun_data,
-                    True,
-                    queue_ram_usage,
-                    qemu_pre,
-                    qemu_post,
-                ),
-            )
+            if unicorn_emulation:
+                p = Process(
+                    name=f"worker_{faults['index']}",
+                    target=python_worker_unicorn,
+                    args=(
+                        faults["faultlist"],
+                        config_qemu,
+                        faults["index"],
+                        queue_output,
+                        pregoldenrun_data,
+                        goldenrun_data,
+                        True,
+                    ),
+                )
+            else:
+                p = Process(
+                    name=f"worker_{faults['index']}",
+                    target=python_worker,
+                    args=(
+                        faults["faultlist"],
+                        config_qemu,
+                        faults["index"],
+                        queue_output,
+                        qemu_output,
+                        goldenrun_data,
+                        True,
+                        queue_ram_usage,
+                        qemu_pre,
+                        qemu_post,
+                    ),
+                )
+
             p.start()
             p_list.append({"process": p, "start_time": time.time()})
 
@@ -498,6 +518,12 @@ def get_argument_parser():
         help="Enables connection to the target with gdb. Port 1234",
         required=False,
     )
+    parser.add_argument(
+        "--unicorn",
+        action="store_true",
+        help="Enables emulation through unicorn engine instead of QEMU",
+        required=False,
+    )
     return parser
 
 
@@ -525,6 +551,8 @@ def process_arguments(args):
     parguments["compressionlevel"] = args.compressionlevel
     if args.compressionlevel is None:
         parguments["compressionlevel"] = 1
+
+    parguments["unicorn_emulation"] = args.unicorn
 
     hdf5file = Path(args.hdf5file)
     if hdf5file.parent.exists() is False:
@@ -629,4 +657,5 @@ if __name__ == "__main__":
         None,  # qemu_pre
         None,  # qemu_post
         None,  # logger_postprocess
+        parguments["unicorn_emulation"], # enable unicorn emulation
     )
