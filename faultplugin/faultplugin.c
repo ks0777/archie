@@ -48,6 +48,8 @@
 #include "protobuf/control.pb-c.h"
 #include "protobuf/data.pb-c.h"
 
+#include "memmapdump.h"
+
 //DEBUG
 #include <errno.h>
 #include <string.h>
@@ -102,6 +104,9 @@ int tb_info_enabled;
 
 int tb_exec_order_enabled;
 int tb_exec_order_ring_buffer;
+
+int full_mem_dump_enabled;
+int memmap_dump_enabled;
 
 
 /* data structures for memory access */
@@ -833,6 +838,14 @@ void free_protobuf_message(Archie__Data* msg)
 	free(msg);
 }
 
+void memmap_dump_register_page(void *key, void *value, void *user_data) {
+	g_autoptr(GString) out = g_string_new("");
+	g_string_printf(out, "Dumping page at %p\n", *(uint64_t*)key);
+	qemu_plugin_outs(out->str);
+	insert_memorydump_config(*(uint64_t*)key, 0x1000);
+	free(key);
+}
+
 /**
  * plugin_end_information_dump
  *
@@ -851,6 +864,28 @@ void plugin_end_information_dump(GString *end_reason)
 	}
 	archie__data__init(msg);
 
+	if (memmap_dump_enabled) {
+	    read_memmap_information_module();
+	}
+
+	if (full_mem_dump_enabled) {
+	    g_autoptr(GHashTable) accessed_pages = g_hash_table_new(g_int64_hash, g_int64_equal);
+
+	    struct mem_info_t *item = mem_info_list;
+	    while(item != NULL)
+	    {
+		if (item->direction == 1) {
+		    uint64_t *page_address = malloc(sizeof(uint64_t));
+		    *page_address = item->memmory_address & 0xfffffffffffff000;
+		    g_hash_table_add(accessed_pages, page_address);
+		}
+		item = item->next;
+	    }
+
+	    g_hash_table_foreach(accessed_pages, memmap_dump_register_page, NULL);
+	}
+
+	int *error = NULL;
 	if(end_point->location.trignum == 4)
 	{
 		msg->end_point = 1;
@@ -1292,6 +1327,8 @@ int readout_control_qemu(void)
 	tb_info_enabled = control_message->tb_info;
 	tb_exec_order_enabled = control_message->tb_exec_list;
 	tb_exec_order_ring_buffer = control_message->tb_exec_list_ring_buffer;
+	memmap_dump_enabled = control_message->memmap_dump;
+	full_mem_dump_enabled = control_message->full_mem_dump;
 	// End of control config
 
 	// Parse memory config
@@ -1530,6 +1567,9 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 
 	g_string_append_printf(out, "[Start]: Reached end of initialisation, starting guest now\n");
 	qemu_plugin_outs(out->str);
+
+	g_string_printf(out, "$$$[Architecture]:%s\n", info->target_name);
+	plugin_write_to_data_pipe(out->str, out->len);
 	return 0;
 ABORT:
 	if(mem_avl_root != NULL)

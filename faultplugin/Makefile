@@ -73,10 +73,13 @@ protobuf/control.pb-c.o: ./protobuf/control.pb-c.c
 protobuf/data.pb-c.o: ./protobuf/data.pb-c.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+memmapdump.o : memmapdump.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-lib%.so: %.o lib/avl.o faultdata.o registerdump.o singlestep.o fault_list.o fault_injection.o tb_info_data_collection.o tb_exec_data_collection.o tb_faulted_collection.o protobuf/fault.pb-c.o protobuf/control.pb-c.o protobuf/data.pb-c.o
+lib%.so: %.o lib/avl.o faultdata.o registerdump.o singlestep.o fault_list.o fault_injection.o tb_info_data_collection.o tb_exec_data_collection.o tb_faulted_collection.o protobuf/fault.pb-c.o protobuf/control.pb-c.o protobuf/data.pb-c.o memmapdump.o
 	$(CC) -shared -Wl,-soname,$@ -o $@ $^ $(LDLIBS)
 
 clean:

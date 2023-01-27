@@ -41,6 +41,8 @@ struct  Archie__Control
   size_t n_memorydumps;
   Archie__MemoryDump **memorydumps;
   protobuf_c_boolean has_start;
+  protobuf_c_boolean memmap_dump;
+  protobuf_c_boolean full_mem_dump;
 };
 #define ARCHIE__CONTROL__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&archie__control__descriptor) \

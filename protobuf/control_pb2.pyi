@@ -29,6 +29,8 @@ class Control(_message.Message):
     tb_exec_list: bool
     tb_exec_list_ring_buffer: bool
     tb_info: bool
+    memmap_dump: bool
+    full_mem_dump: bool
     def __init__(self, max_duration: _Optional[int] = ..., num_faults: _Optional[int] = ..., tb_exec_list: bool = ..., tb_info: bool = ..., mem_info: bool = ..., start_address: _Optional[int] = ..., start_counter: _Optional[int] = ..., end_points: _Optional[_Iterable[_Union[EndPoint, _Mapping]]] = ..., tb_exec_list_ring_buffer: bool = ..., memorydumps: _Optional[_Iterable[_Union[MemoryDump, _Mapping]]] = ..., has_start: bool = ...) -> None: ...
 
 class EndPoint(_message.Message):
