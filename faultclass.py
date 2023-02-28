@@ -547,6 +547,14 @@ def readout_tb_faulted(data_protobuf):
     return tb_faulted_list
 
 
+def readout_memmap(line):
+    split = line.split("|")
+    memmap = {}
+    memmap["address"] = int(split[0], 16)
+    memmap["length"] = int(split[1], 16)
+    return memmap
+
+
 def readout_data(
     pipe,
     index,
@@ -569,9 +577,12 @@ def readout_data(
     memdumplist = []
     registerlist = []
     tbfaultedlist = []
+    memmaplist = []
     tbinfo = 0
     tbexec = 0
     meminfo = 0
+    memdump = 0
+    memmap = 0
     endpoint = 0
     end_reason = ""
     max_ram_usage = 0
@@ -746,6 +757,7 @@ def configure_qemu(control, config_qemu, num_faults, memorydump_list, index):
     # If enabled, use the ring buffer for all runs except for the goldenrun
     control_message.tb_exec_list_ring_buffer = config_qemu["ring_buffer"] and index >= 0
 
+    control_message.memmap_dump = index == -2
     control_message.full_mem_dump = index == -2
 
     if index != -2 and memorydump_list is not None:
@@ -901,17 +913,20 @@ def python_worker_unicorn(
         goldenrun_data["tbinfo"],
         index,
     )
-    output["tbexec"] = write_output_wrt_goldenrun("tbexec", pdtbexeclist, goldenrun_data)
+    output["tbexec"] = write_output_wrt_goldenrun(
+        "tbexec", pdtbexeclist, goldenrun_data
+    )
     output["tbinfo"] = write_output_wrt_goldenrun("tbinfo", tblist, goldenrun_data)
 
-    output["armregisters"] = write_output_wrt_goldenrun("armregisters", pd.DataFrame(logs["registerlist"], dtype="UInt64"), goldenrun_data)
+    regtype = pregoldenrun_data["architecture"]
+    output[f"{regtype}registers"] = pd.DataFrame(
+        logs["registerlist"], dtype="UInt64"
+    ).to_dict("records")
 
     queue_output.put(output)
 
     logger.info(
-        "Python worker for experiment {} done. Took {}s".format(
-            index, time.time() - t0
-        )
+        "Python worker for experiment {} done. Took {}s".format(index, time.time() - t0)
     )
 
     return
