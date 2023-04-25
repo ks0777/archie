@@ -42,4 +42,5 @@ jobs:
           args: --all --manifest-path ./emulation_worker/Cargo.toml -- --check
       - run: |
           cd emulation_worker
+          git submodule update --init unicorn
           cargo clippy -- -D warnings
