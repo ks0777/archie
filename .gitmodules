@@ -1,3 +1,6 @@
 [submodule "qemu"]
 	path = qemu
 	url = https://github.com/Fraunhofer-AISEC/archie-qemu.git
+[submodule "emulation_worker/unicorn"]
+	path = emulation_worker/unicorn
+	url = https://github.com/unicorn-engine/unicorn.git
