@@ -29,7 +29,7 @@ volatile uint64_t req_singlestep = 0;
 
 void init_singlestep_req(void)
 {
-	req_singlestep = 0;
+	req_singlestep = 1;
 }
 
 void check_singlestep(void)
@@ -57,13 +57,4 @@ void add_singlestep_req(void)
 
 void rem_singlestep_req(void)
 {
-	if(req_singlestep != 0)
-	{
-		g_autoptr(GString) out = g_string_new("");
-		qemu_plugin_outs("[SINGLESTEP]: decrease request\n");
-		req_singlestep--;
-		g_string_printf(out, "[SINGLESTEP]: requests %li\n", req_singlestep);
-		qemu_plugin_outs(out->str);
-		check_singlestep();
-	}
 }

@@ -1024,6 +1024,7 @@ void tb_exec_end_cb(unsigned int vcpu_index, void *vcurrent)
 
 void tb_exec_start_cb(unsigned int vcpu_index, void *vcurrent)
 {
+	add_singlestep_req();
 	if(start_point.hitcounter == 1)
 	{
 		qemu_plugin_outs("[Start]: Start point reached");
