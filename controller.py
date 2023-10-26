@@ -19,8 +19,9 @@
 import argparse
 import hashlib
 import logging
-from multiprocessing import Manager, Process
+from multiprocessing import Manager, Process, Value
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tables
@@ -46,6 +47,24 @@ from hdf5logger import hdf5collector
 from goldenrun import run_goldenrun
 
 clogger = logging.getLogger(__name__)
+
+stop_signal_received = Value("i", 0)
+
+
+def signal_handler(signum, frame):
+    global stop_signal_received
+    stop_signal_received.value = 1
+
+
+def register_signal_handlers():
+    signal.signal(
+        signal.SIGTERM,
+        signal_handler,
+    )
+    signal.signal(
+        signal.SIGINT,
+        signal_handler,
+    )
 
 
 def build_ranges_dict(fault_dict):
@@ -468,6 +487,60 @@ def read_backup(hdf5_file):
     return [backup_expanded_faults, backup_config, backup_goldenrun]
 
 
+def read_simulated_faults(hdf5_file):
+    with tables.open_file(hdf5_file, "r") as f_in:
+        # Process simulated faults
+        simulated_faults_hash = set()
+        exp_n = 0
+
+        for exp in tqdm(
+            f_in.root.fault,
+            total=f_in.root.fault._v_nchildren,
+            desc="Reading simulated faults",
+        ):
+            simulated_exp = {
+                "index": exp_n,
+                "faultlist": [
+                    Fault(
+                        fault["fault_address"],
+                        [],
+                        fault["fault_type"],
+                        fault["fault_model"],
+                        fault["fault_lifespan"],
+                        fault["fault_mask"],
+                        fault["trigger_address"],
+                        fault["trigger_hitcounter"],
+                        fault["fault_num_bytes"],
+                        fault["fault_wildcard"],
+                    )
+                    for fault in exp.faults.iterrows()
+                ],
+            }
+
+            config_string = ""
+            for fault in simulated_exp["faultlist"]:
+                config_string += str(fault)
+            simulated_faults_hash.add(config_string)
+
+            exp_n = exp_n + 1
+
+        return simulated_faults_hash
+
+
+def get_not_simulated_faults(faultlist, simulated_faults):
+    missing_faultlist = []
+
+    for faultconfig in faultlist:
+        config_string = ""
+        for fault in faultconfig["faultlist"]:
+            config_string += str(fault)
+
+        if config_string not in simulated_faults:
+            missing_faultlist.append(faultconfig)
+
+    return missing_faultlist
+
+
 def controller(
     args,
     hdf5mode,
@@ -476,6 +549,8 @@ def controller(
     num_workers,
     queuedepth,
     compressionlevel,
+    missing_only,
+    goldenrun_only,
     goldenrun=True,
     logger=hdf5collector,
     qemu_pre=None,
@@ -535,7 +610,10 @@ def controller(
             )
             return config_qemu
 
-        clogger.info("Backup matched and will be used")
+        clogger.info("Backup matched")
+
+        if goldenrun_only:
+            return config_qemu
 
         faultlist = backup_expanded_faultlist
         config_qemu["max_instruction_count"] = backup_config["max_instruction_count"]
@@ -561,6 +639,27 @@ def controller(
         log_config = False
         log_goldenrun = False
 
+    if goldenrun_only:
+        faultlist = []
+        overwrite_faults = False
+
+        log_config = True
+        log_goldenrun = True
+
+    if missing_only:
+        simulated_faults = read_simulated_faults(hdf5_file)
+        faultlist = get_not_simulated_faults(faultlist, simulated_faults)
+
+        log_config = False
+        log_goldenrun = False
+
+        overwrite_faults = False
+
+        if faultlist:
+            clogger.info(f"{len(faultlist)} faults are missing and will be simulated")
+        else:
+            clogger.info("All faults are already simulated")
+
     p_logger = Process(
         target=logger,
         args=(
@@ -568,6 +667,7 @@ def controller(
             hdf5mode,
             queue_output,
             len(faultlist),
+            stop_signal_received,
             compressionlevel,
             logger_postprocess,
             log_config,
@@ -598,9 +698,23 @@ def controller(
             continue
         goldenrun_data[keyword] = pd.DataFrame(goldenrun_data[keyword])
 
-    pbar = tqdm(total=len(faultlist), desc="Simulating faults")
+    # Handlers are used for a graceful exit, in case of a signal
+    register_signal_handlers()
+
     itter = 0
     while 1:
+        if stop_signal_received.value == 1:
+            clogger.info(
+                "Stop signal received, finishing the current write operation..."
+            )
+
+            p_logger.join()
+
+            for p in p_list:
+                p["process"].kill()
+
+            break
+
         if len(p_list) == 0 and itter == len(faultlist):
             clogger.debug("Done inserting qemu jobs")
             break
@@ -671,8 +785,6 @@ def controller(
             # Find finished processes
             p["process"].join(timeout=0)
             if p["process"].is_alive() is False:
-                # Update the progress bar
-                pbar.update(1)
                 # Recalculate moving average
                 p_time_list.append(current_time - p["start_time"])
                 len_p_time_list = len(p_time_list)
@@ -685,7 +797,6 @@ def controller(
                 break
 
     clogger.debug("{} experiments remaining in queue".format(queue_output.qsize()))
-    pbar.close()
     p_logger.join()
 
     clogger.debug("Done with qemu and logger")
@@ -697,7 +808,11 @@ def controller(
         "Took {}:{}:{} to complete all experiments".format(int(h), int(m), int(s))
     )
 
-    tperindex = (t1 - t0) / len(faultlist)
+    if faultlist:
+        tperindex = (t1 - t0) / len(faultlist)
+    else:
+        tperindex = t1 - t0
+
     tperworker = tperindex / num_workers
     clogger.debug(
         "Took average of {}s per fault, python worker rough runtime is {}s".format(
@@ -787,6 +902,19 @@ def get_argument_parser():
         action="store_true",
         required=False,
     )
+    parser.add_argument(
+        "--goldenrun-only",
+        help="Only run goldenrun",
+        action="store_true",
+        required=False,
+    )
+    parser.add_argument(
+        "--missing-only",
+        "-m",
+        help="Only run missing experiments",
+        action="store_true",
+        required=False,
+    )
     return parser
 
 
@@ -822,6 +950,19 @@ def process_arguments(args):
             f"{hdf5file.parent}"
         )
         exit(1)
+
+    if args.goldenrun_only:
+        parguments["goldenrun_only"] = True
+        parguments["goldenrun"] = True
+    else:
+        parguments["goldenrun_only"] = False
+
+    if args.missing_only and hdf5file.is_file():
+        parguments["missing_only"] = True
+        parguments["hdf5mode"] = "a"
+        parguments["goldenrun"] = False
+    else:
+        parguments["missing_only"] = False
 
     qemu_conf = json.load(args.qemu)
     args.qemu.close()
@@ -930,6 +1071,8 @@ if __name__ == "__main__":
         parguments["num_workers"],  # num_workers
         parguments["queuedepth"],  # queuedepth
         parguments["compressionlevel"],  # compressionlevel
+        parguments["missing_only"],  # missing_only flag
+        parguments["goldenrun_only"],  # goldenrun_only flag
         parguments["goldenrun"],  # goldenrun
         hdf5collector,  # logger
         None,  # qemu_pre
