@@ -8,7 +8,8 @@ use pyo3::{
     types::{PyDict, PyList},
 };
 use std::sync::RwLock;
-use std::{collections::HashMap, ffi::c_void};
+use std::{collections::HashMap};
+use unicorn_engine::UcHookId;
 
 pub struct MemInfo {
     pub ins: u64,
@@ -81,7 +82,7 @@ pub struct Trigger {
 pub struct Fault {
     pub trigger: Trigger,
     pub address: u64,
-    pub kind: FaultType,
+    pub r#type: FaultType,
     pub model: FaultModel,
     pub mask: u128,
     pub lifespan: u32,
@@ -200,7 +201,7 @@ pub struct State {
     pub faults: RwLock<HashMap<u64, Fault>>,
     pub live_faults: RwLock<PriorityQueue<(u64, BigUint), u64>>,
     pub instruction_count: RwLock<u64>,
-    pub single_step_hook_handle: RwLock<Option<*mut c_void>>,
+    pub single_step_hook_handle: RwLock<Option<UcHookId>>,
     pub cs_engine: Capstone,
     pub arch_operator: ArchitectureDependentOperator,
 

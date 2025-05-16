@@ -117,7 +117,7 @@ fn single_step_hook_cb(uc: &mut Unicorn<'_, ()>, address: u64, size: u32, state:
     );
 
     if let Some(fault) = undone_fault {
-        if !matches!(fault.kind, FaultType::Register) {
+        if !matches!(fault.r#type, FaultType::Register) {
             dump_memory(
                 uc,
                 address,
@@ -151,7 +151,7 @@ fn mem_hook_cb(
 
     let mut meminfo = state.logs.meminfo.write().unwrap();
 
-    if let Some(mut element) = meminfo.get_mut(&(address, pc)) {
+    if let Some(element) = meminfo.get_mut(&(address, pc)) {
         element.counter += 1;
     } else {
         let last_tbid = *state.last_tbid.read().unwrap();
@@ -187,7 +187,7 @@ fn fault_hook_cb(uc: &mut Unicorn<'_, ()>, address: u64, _size: u32, state: &Arc
 
     let prefault_data;
 
-    match fault.kind {
+    match fault.r#type {
         FaultType::Data | FaultType::Instruction => {
             let fault_size = calculate_fault_size(fault);
             let data = BigUint::from_bytes_le(
@@ -211,7 +211,7 @@ fn fault_hook_cb(uc: &mut Unicorn<'_, ()>, address: u64, _size: u32, state: &Arc
             fault_data.extend(std::iter::repeat(0).take(fault_size as usize - fault_data.len()));
             uc.mem_write(fault.address, fault_data.as_slice())
                 .expect("failed writing fault data to memory");
-            if matches!(fault.kind, FaultType::Instruction) {
+            if matches!(fault.r#type, FaultType::Instruction) {
                 // We need to remove the tb containing the modified instructions from the cache
                 // since they might not have any effect otherwise
                 uc.ctl_remove_cache(fault.address, fault.address + fault_size as u64)
@@ -277,7 +277,7 @@ fn initialize_block_hook(emu: &mut Unicorn<()>, state_arc: &Arc<State>) -> io::R
     let block_hook_closure = move |uc: &mut Unicorn<'_, ()>, address: u64, size: u32| {
         block_hook_cb(uc, address, size, &state_arc);
     };
-    emu.add_block_hook(block_hook_closure)
+    emu.add_block_hook(1, 0, block_hook_closure)
         .expect("failed to add block hook");
 
     Ok(())

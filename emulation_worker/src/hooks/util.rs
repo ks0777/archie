@@ -87,7 +87,7 @@ pub fn undo_faults(
     let fault = faults.get(&address).unwrap();
 
     debug!("Undoing fault");
-    match fault.kind {
+    match fault.r#type {
         FaultType::Register => {
             uc.reg_write(fault.address as i32, prefault_data.to_u64().unwrap())
                 .expect("failed restoring register value");
@@ -95,7 +95,7 @@ pub fn undo_faults(
         FaultType::Data | FaultType::Instruction => {
             uc.mem_write(fault.address, prefault_data.to_bytes_le().as_slice())
                 .expect("failed restoring memory value");
-            if matches!(fault.kind, FaultType::Instruction) {
+            if matches!(fault.r#type, FaultType::Instruction) {
                 //uc.ctl_arg_2(UC_CTL_TB_REMOVE_CACHE | UC_CTL_IO_WRITE, unsafe { std::mem::transmute::<u64, *mut c_void>(address) }, unsafe { std::mem::transmute::<u64, *mut c_void>(fault.address + prefault_data.to_bytes_le().len() as u64) }).unwrap();
                 uc.ctl_remove_cache(
                     fault.address,
